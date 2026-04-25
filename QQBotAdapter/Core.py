@@ -78,22 +78,26 @@ class QQBotAdapter(sdk.BaseAdapter):
                         media_info = await self._adapter._upload_media(file, self._target_type, self._target_id, 1)
                     elif file:
                         media_info = await self._adapter._upload_media(file, self._target_type, self._target_id, 1)
-                    msg_type = 7
+                    if media_info:
+                        msg_type = 7
                 elif seg_type == "voice":
                     file = data.get("file", data.get("url", ""))
                     if isinstance(file, (bytes, str)) and file:
                         media_info = await self._adapter._upload_media(file, self._target_type, self._target_id, 3)
-                    msg_type = 7
+                    if media_info:
+                        msg_type = 7
                 elif seg_type == "video":
                     file = data.get("file", data.get("url", ""))
                     if isinstance(file, (bytes, str)) and file:
                         media_info = await self._adapter._upload_media(file, self._target_type, self._target_id, 2)
-                    msg_type = 7
+                    if media_info:
+                        msg_type = 7
                 elif seg_type == "file":
                     file = data.get("file", data.get("url", ""))
                     if isinstance(file, (bytes, str)) and file:
                         media_info = await self._adapter._upload_media(file, self._target_type, self._target_id, 4)
-                    msg_type = 7
+                    if media_info:
+                        msg_type = 7
                 elif seg_type == "markdown":
                     msg_type = 2
                     markdown_data = data
@@ -232,22 +236,41 @@ class QQBotAdapter(sdk.BaseAdapter):
             return None
 
         token = await self._ensure_token()
-        headers = {"Authorization": f"QQBot {token}"}
+        headers = {"Authorization": f"QQBot {token}", "Content-Type": "application/json"}
 
-        form = aiohttp.FormData()
-        form.add_field("file_type", str(file_type))
-        if isinstance(file, bytes):
-            form.add_field("file_data", file, filename="file", content_type="application/octet-stream")
+        payload = {"file_type": file_type, "srv_send_msg": False}
+
+        if isinstance(file, str) and file.startswith(("http://", "https://")):
+            payload["url"] = file
+        elif isinstance(file, bytes):
+            import base64
+            payload["file_data"] = base64.b64encode(file).decode("utf-8")
         elif isinstance(file, str):
-            form.add_field("file_data", file)
+            try:
+                import os
+                if os.path.isfile(file):
+                    with open(file, "rb") as f:
+                        file_bytes = f.read()
+                    import base64
+                    payload["file_data"] = base64.b64encode(file_bytes).decode("utf-8")
+                else:
+                    self.logger.error(f"文件不存在: {file}")
+                    return None
+            except Exception as e:
+                self.logger.error(f"读取本地文件失败: {e}")
+                return None
 
         try:
-            async with self.session.post(url, data=form, headers=headers) as resp:
+            async with self.session.post(url, json=payload, headers=headers) as resp:
                 data = await resp.json()
-                file_info = data.get("file_info") or data.get("data", {}).get("file_info", "")
+                self.logger.debug(f"上传媒体响应: {data}")
+                file_info = data.get("file_info", "")
+                if not file_info:
+                    self.logger.error(f"上传媒体失败: {data}")
+                    return None
                 return file_info
         except Exception as e:
-            self.logger.error(f"上传媒体失败: {e}")
+            self.logger.error(f"上传媒体异常: {e}")
             return None
 
     async def call_api(self, endpoint: str, **params):
